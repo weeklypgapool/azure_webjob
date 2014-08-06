@@ -76,21 +76,33 @@ function ExtractPgaDataIntoFb(dataUrl) {
 	}).end();
 }
 
-function IsWithinWindow() {
-	// Exit if not Thu thru Sun, or too early, or too late
-	var now = new Date();
-	var dow = now.getDay();
-	// Ensure that it's Thu thru Sun
-	if (dow !== 0 && (dow < 4 || dow > 6)) { return false; }
-	// Ensure that time is reasonable - between 4 am PST and 8 pm PST
-	var time = dow.getTime();
-	if (time < 1407236400000 || time > 1407294000000) { return false; }
-	return true;
+function IsWithinWindow(callback) {
+	// Check if should force new data
+	curTourneyRef.child('forceNewData').once('value', function (snap) {
+		if (snap.val() == true) {
+			curTourneyRef.child('forceNewData').set(false);
+			callback();
+		} else {
+			// Exit if not Thu thru Sun, or too early, or too late
+			var now = new Date();
+			var dow = now.getDay();
+			// Ensure that it's Thu thru Sun
+			if (dow !== 0 && (dow < 4 || dow > 6)) {
+				console.log('Not within time window');
+				ExitNode();
+			}
+			// Ensure that time is reasonable - between 4 am PST and 8 pm PST
+			var time = dow.getTime();
+			if (time < 1407236400000 || time > 1407294000000) {
+				console.log('Not within time window');
+				ExitNode();
+			}
+			callback();
+		}
+	});
 }
 
-// ----  Main Processing
-
-if (IsWithinWindow()) {
+function DoWork() {
 	// Get the website url for the current tournament.  This value is currently
 	// manually entered into the fb.  Data transfer is done inside GetPgaJson()
 	curTourneyRef.child('dataUrl').once('value', function (snap) {
@@ -100,10 +112,12 @@ if (IsWithinWindow()) {
 			ExtractPgaDataIntoFb(dataUrl);
 		});
 	});
-} else {
-	console.log('Not within time window');
-	ExitNode();
 }
+
+// ----  Main Processing
+
+IsWithinWindow(DoWork);
+
 
 
 // Load last update info stored in Mongodb
