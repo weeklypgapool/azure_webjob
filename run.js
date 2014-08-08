@@ -4,11 +4,13 @@ var http = require('http');
 var path = require('path');
 var _ = require('lodash');
 var Firebase = require('firebase');
-//var MongoClient = require('mongodb').MongoClient;
 
 var curTourneyRef = new Firebase('https://weeklypgapool.firebaseio.com/tournaments/current'),
 		dataUrl, last_updated,
-		pgaJson;
+		pgaJson, round_state;
+
+// Authenticate to fb
+curTourneyRef.auth('uOdRH5Zyzy4QzGSB1HFO2thq6KsKrTWx3FTSKd8A');
 
 // Local functions
 
@@ -17,19 +19,20 @@ function ExitNode() {
 }
 
 function PutPgaJsonIntoFb(pgaJson) {
-	var lb = {
-		"leaderboard": pgaJson.leaderboard
-	};
+	var lb = pgaJson.leaderboard
 	delete pgaJson.leaderboard;
-	curTourneyRef.child('data').set(lb, function () {
-		curTourneyRef.child('data/stats').set(pgaJson, function (err) {
-			if (err) {
-				console.log(err);
-			} else {
-				console.log('success');
-				ExitNode();
-			}
-		});
+	// Remove all '.' not allowed as FB key
+	var lbStr = JSON.stringify(lb);
+	lbStr =	lbStr.replace(/\./g, '');
+	lb = JSON.parse(lbStr);
+	curTourneyRef.child('data/stats').update(pgaJson);
+	curTourneyRef.child('data/leaderboard').set(lb, function (err) {
+		if (err) {
+			console.log(err);
+		} else {
+			console.log('success');
+			ExitNode();
+		}
 	});
 }
 
@@ -38,9 +41,9 @@ function FormatPgaJson(pgaJson) {
 	var players = [];
 	json.last_updated = pgaJson.last_updated;
 	pgaJson = pgaJson.leaderboard;
+	json.round_state = pgaJson.round_state;
 	json.tournament_name = pgaJson.tournament_name;
 	json.current_round = pgaJson.current_round;
-	json.round_state = pgaJson.round_state;
 	json.start_date = pgaJson.start_date;
 	json.end_date = pgaJson.end_date;
 	json.is_started = pgaJson.is_started;
@@ -55,7 +58,13 @@ function FormatPgaJson(pgaJson) {
 			"thru": player.thru,
 			"today": player.today,
 			"total": player.total,
-			"money_event": player.rankings.projected_money_event
+			"money_event": player.rankings.projected_money_event,
+			"tee_times": {
+				"1": player.rounds['0'].tee_time,
+				"2": player.rounds['1'].tee_time,
+				"3": player.rounds['2'].tee_time,
+				"4": player.rounds['3'].tee_time
+			}
 		};
 	});
 	return json;
@@ -70,6 +79,8 @@ function ExtractPgaDataIntoFb(dataUrl) {
 		resp.on('end', function () {
 			pgaJson = JSON.parse(pgaJson);
 			if (pgaJson.last_updated === last_updated) { ExitNode(); }
+			if (pgaJson.round_state !== 'In Progress'
+		 				&& (pgaJson.round_state === round_state)) { ExitNode(); }
 			pgaJson = FormatPgaJson(pgaJson);
 			PutPgaJsonIntoFb(pgaJson);
 		});
@@ -92,8 +103,8 @@ function IsWithinWindow(callback) {
 				ExitNode();
 			}
 			// Ensure that time is reasonable - between 4 am PST and 8 pm PST
-			var time = dow.getTime();
-			if (time < 1407236400000 || time > 1407294000000) {
+			var time = now.getHours();
+			if (time < 4 || time > 22) {
 				console.log('Not within time window');
 				ExitNode();
 			}
@@ -109,22 +120,13 @@ function DoWork() {
 		dataUrl = snap.val();
 		curTourneyRef.child('data/last_updated').once('value', function (snap) {
 			last_updated = snap.val();
-			ExtractPgaDataIntoFb(dataUrl);
+			curTourneyRef.child('data/stats/round_state').once('value', function (snap) {
+				round_state = snap.val();
+				ExtractPgaDataIntoFb(dataUrl);
+			});
 		});
 	});
 }
 
 // ----  Main Processing
-
 IsWithinWindow(DoWork);
-
-
-
-// Load last update info stored in Mongodb
-//MongoClient.connect('mongodb://weeklypgapool:wpgap0333@ds050087.mongolab.com:50087/weeklypgapool', function(err, db) {
-//	if (err) { process.exit(1); }
-//	var coll = db.collection('last_update_cache');
-//	
-//});
-
-
