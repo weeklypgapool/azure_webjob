@@ -7,13 +7,12 @@ var _ = require('lodash');
 var Firebase = require('firebase');
 
 var curTourneyRef = new Firebase('https://weeklypgapool.firebaseio.com/tournaments/current'),
-	dataUrl,
-	last_updated,
-	pgaJson,
-	round_state,
-	isGolfDotCom = false,
-	money_computed_manually,
-	windowStart, windowEnd;
+		dataUrl,
+		last_updated,
+		pgaJson,
+		round_state,
+		isGolfDotCom = false,
+		money_computed_manually;
 
 // Authenticate to fb
 curTourneyRef.auth('uOdRH5Zyzy4QzGSB1HFO2thq6KsKrTWx3FTSKd8A');
@@ -133,6 +132,10 @@ function ComputeMoneyAndPutInJsonGolfDotCom(json, callback) {
 	} else {
 		totalPurse = json.money.total_purse;
 		moneyByPos = BuildMoneyArray(totalPurse);
+		
+		
+		
+		
 		ProcessPayoutsGolfDotCom(json, moneyByPos);
 		callback();
 	}
@@ -315,12 +318,8 @@ function IsWithinWindow(callback) {
 			// Exit if not Thu thru Sun, or too early, or too late
 			var now = new Date();
 			var dow = now.getDay();
-			// Check for custom start/end window
-			if (windowStart) {
-				if (now < Date(windowStart) || now > Date(windowEnd)) {
-					ExitNode();
-				}
-			} else if (dow !== 0 && (dow < 4 || dow > 7)) {   // Ensure that it's Thu thru Sun
+			// Ensure that it's Thu thru Sun
+			if (dow !== 0 && (dow < 4 || dow > 7)) {
 				console.log('Not within time window');
 				ExitNode();
 			}
@@ -345,11 +344,8 @@ function DoWork() {
 			last_updated = snap.val();
 			curTourneyRef.child('data/stats/round_state').once('value', function (snap) {
 				round_state = snap.val();
-				curTourneyRef.child('custom_config').once('value', function (snap) {
-					var config = snap.val();
-					money_computed_manually = config.money_computed_manually;
-					windowStart = config.window_start;
-					windowEnd = config.window_end;
+				curTourneyRef.child('money_computed_manually').once('value', function (snap) {
+					money_computed_manually = snap.val();
 					ExtractPgaDataIntoFb(dataUrl);
 				});
 			});
