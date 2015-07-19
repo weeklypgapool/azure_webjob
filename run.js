@@ -291,7 +291,18 @@ function ExtractPgaDataIntoFb(dataUrl) {
 				if (pgaJson.round_state !== 'In Progress'
 							&& (pgaJson.round_state === round_state)) { ExitNode(); }
 				pgaJson = FormatPgaJson(pgaJson);
-				PutPgaJsonIntoFb(pgaJson);
+				// if pgatour not providing money, then compute it like code for golf.com
+				if (pgaJson.leaderboard[0].money_event === 0) {	
+					curTourneyRef.child('purse').once('value', function (snap) {
+						pgaJson.money = {};
+						pgaJson.money.total_purse = snap.val();
+						ComputeMoneyAndPutInJsonGolfDotCom(pgaJson, function () {
+							PutPgaJsonIntoFb(pgaJson);
+						});
+					});
+				} else {
+					PutPgaJsonIntoFb(pgaJson);
+				}		
 			}
 		});
 	}).end();
