@@ -12,7 +12,7 @@ var curTourneyRef = new Firebase('https://weeklypgapool.firebaseio.com/tournamen
 		pgaJson,
 		round_state,
 		isGolfDotCom = false,
-		money_computed_manually;
+		config = {};
 
 // Authenticate to fb
 curTourneyRef.auth('uOdRH5Zyzy4QzGSB1HFO2thq6KsKrTWx3FTSKd8A');
@@ -75,6 +75,7 @@ function FormatPgaJson(pgaJson) {
 	json.leaderboard = _.map(players, function (player) {
 		return {
 			"name": player.player_bio.first_name + ' ' + player.player_bio.last_name,
+			"is_amateur": player.player_bio.is_amateur,
 			"player_id": player.player_id,
 			"current_position": player.current_position,
 			"total_strokes": player.total_strokes,
@@ -103,7 +104,7 @@ function FormatPgaJsonGolfDotCom(pgaJson, callback) {
 	pgaJson.pu = pgaJson.pu.replace(/[$,]/g,'');
 	json.money = {'total_purse': parseInt(pgaJson.pu)};
 	players = pgaJson.ps.p;
-	json.leaderboard = _.map(players, function (player) {
+	json.leaderboard = _.map(players, function (player) {	
 		return {
 			"name": player.fn + ' ' + player.ln,
 			"player_id": player.pid,
@@ -123,53 +124,87 @@ function FormatPgaJsonGolfDotCom(pgaJson, callback) {
 function ComputeMoneyAndPutInJsonGolfDotCom(json, callback) {
 	var totalPurse,
 			moneyByPos;
-	if (money_computed_manually) {
-		curTourneyRef.child('payouts').once('value', function (snap) {
-			moneyByPos = snap.val();
-			ProcessPayoutsGolfDotCom(json, moneyByPos);
-			callback();
-		});
+	if (config.money_computed_manually) {
+		moneyByPos = config.payouts;
+		ProcessPayoutsGolfDotCom(json, moneyByPos);
+		callback();
 	} else {
 		totalPurse = json.money.total_purse;
 		moneyByPos = BuildMoneyArray(totalPurse);
-		
-		
-		
-		
 		ProcessPayoutsGolfDotCom(json, moneyByPos);
 		callback();
 	}
 }
 	
+// function ProcessPayoutsGolfDotCom(json, moneyByPos) {
+// 	var	prevPos = json.leaderboard[0].current_position,
+// 		amateur_count = 0,
+// 		tieStart = 1,
+// 		tieCount = 0,
+// 		tieMoney = 0;
+// 	_.forEach(json.leaderboard, function (player, idx) {
+// 		if (player.is_amateur) {		
+// 			amateur_count++;
+// 			json.leaderboard[idx].money_event = 0;
+// 			return;
+// 		}
+// 		if (player.current_position !== prevPos) {
+// 			// Compute and store prev position(s)
+// 			for (var i = 0; i < tieCount; i++) {
+// 				json.leaderboard[tieStart + i - 1 + amateur_count].money_event = Math.round(tieMoney / tieCount);
+// 			}
+// 			// Save new pos
+// 			prevPos = player.current_position;
+// 			// Reset counters
+// 			tieCount = 1;
+// 			tieMoney = moneyByPos[idx + 1 - amateur_count];
+// 			// Mark position of possible tie
+// 			tieStart = idx + 1;
+// 		} else {
+// 			// Accumulate
+// 			tieCount++;
+// 			tieMoney = tieMoney + moneyByPos[idx + 1 - amateur_count];
+// 		}
+// 	});
+// 	// Last 'group' of players
+// 	for (var i = 0; i < tieCount; i++) {
+// 		json.leaderboard[tieStart + i - 1].money_event = Math.round(tieMoney / tieCount);
+// 	}
+// }
+
 function ProcessPayoutsGolfDotCom(json, moneyByPos) {
-	var	prevPos = json.leaderboard[0].current_position,
-			tieStart = 1,
-			tieCount = 0,
-			tieMoney = 0;
+	var moneyIdx = 1;
+	var playerCount = 0;
+	var sumMoney = 0;
+	var savePos = json.leaderboard[0].current_position;
 	_.forEach(json.leaderboard, function (player, idx) {
-		if (player.current_position !== prevPos) {
-			// Compute and store prev position(s)
-			for (var i = 0; i < tieCount; i++) {
-				json.leaderboard[tieStart + i - 1].money_event = Math.round(tieMoney / tieCount);
-			}
-			// Save new pos
-			prevPos = player.current_position;
-			// Reset counters
-			tieCount = 1;
-			tieMoney = moneyByPos[idx + 1];
-			// Mark position of possible tie
-			tieStart = idx + 1;
+		if (player.current_position !== savePos) spreadMoney(idx);
+		if (player.is_amateur) {
+			json.leaderboard[idx].money_event = 0;
 		} else {
-			// Accumulate
-			tieCount++;
-			tieMoney = tieMoney + moneyByPos[idx + 1];
-		}
+			sumMoney += moneyByPos[moneyIdx];
+			moneyIdx++;
+			playerCount++;
+		} 
 	});
-	// Last 'group' of players
-	for (var i = 0; i < tieCount; i++) {
-		json.leaderboard[tieStart + i - 1].money_event = Math.round(tieMoney / tieCount);
+
+	function spreadMoney (idx) {
+		var money = Math.round(sumMoney / playerCount);
+		savePos = json.leaderboard[idx].current_position;
+		while (playerCount > 0) {
+			if (!json.leaderboard[idx - 1].is_amateur) {  // check if amateur
+				json.leaderboard[idx - 1].money_event = money;
+				playerCount--;
+			}
+			idx--;  // move player pointer back
+		}
+		sumMoney = 0;
 	}
+
 }
+
+
+
 
 function BuildMoneyArray(purse) {
 	var arr = [];
@@ -293,12 +328,10 @@ function ExtractPgaDataIntoFb(dataUrl) {
 				pgaJson = FormatPgaJson(pgaJson);
 				// if pgatour not providing money, then compute it like code for golf.com
 				if (pgaJson.leaderboard[0].money_event === 0) {	
-					curTourneyRef.child('purse').once('value', function (snap) {
-						pgaJson.money = {};
-						pgaJson.money.total_purse = snap.val();
-						ComputeMoneyAndPutInJsonGolfDotCom(pgaJson, function () {
-							PutPgaJsonIntoFb(pgaJson);
-						});
+					pgaJson.money = {};
+					pgaJson.money.total_purse = config.purse;
+					ComputeMoneyAndPutInJsonGolfDotCom(pgaJson, function () {
+						PutPgaJsonIntoFb(pgaJson);
 					});
 				} else {
 					PutPgaJsonIntoFb(pgaJson);
@@ -318,17 +351,15 @@ function IsWithinWindow(callback) {
 			// Exit if not Thu thru Sun, or too early, or too late
 			var now = new Date();
 			var dow = now.getDay();
-			// Ensure that it's Thu thru Sun
-			if (dow !== 0 && (dow < 4 || dow > 7)) {
+			// check for custom window
+			if (config.window_start) {
+				if (now < Date(config.window_start) || now > Date(config.window_end)) {
+					ExitNode();
+				}
+			} else if (dow !== 0 && (dow < 4 || dow > 7)) {   // Ensure that it's Thu thru Sun
 				console.log('Not within time window');
 				ExitNode();
 			}
-//			// Ensure that time is reasonable
-//			var time = now.getHours();
-//			if (time < 4 || time > 22) {
-//				console.log('Not within time window');
-//				ExitNode();
-//			}
 			callback();
 		}
 	});
@@ -344,8 +375,8 @@ function DoWork() {
 			last_updated = snap.val();
 			curTourneyRef.child('data/stats/round_state').once('value', function (snap) {
 				round_state = snap.val();
-				curTourneyRef.child('money_computed_manually').once('value', function (snap) {
-					money_computed_manually = snap.val();
+				curTourneyRef.child('custom_config').once('value', function (snap) {
+					config = snap.val();
 					ExtractPgaDataIntoFb(dataUrl);
 				});
 			});
