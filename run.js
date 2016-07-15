@@ -104,7 +104,7 @@ function FormatPgaJsonGolfDotCom(pgaJson, callback) {
 	pgaJson.pu = pgaJson.pu.replace(/[$,]/g,'');
 	json.money = {'total_purse': parseInt(pgaJson.pu)};
 	players = pgaJson.ps.p;
-	json.leaderboard = _.map(players, function (player) {	
+	json.leaderboard = _.map(players, function (player) {
 		return {
 			"name": player.fn + ' ' + player.ln,
 			"player_id": player.pid,
@@ -126,16 +126,16 @@ function ComputeMoneyAndPutInJsonGolfDotCom(json, callback) {
 			moneyByPos;
 	if (config.money_computed_manually) {
 		moneyByPos = config.payouts;
-		ProcessPayoutsGolfDotCom(json, moneyByPos);
+		processPayoutsGolfDotCom(json, moneyByPos);
 		callback();
 	} else {
 		totalPurse = json.money.total_purse;
 		moneyByPos = BuildMoneyArray(totalPurse);
-		ProcessPayoutsGolfDotCom(json, moneyByPos);
+		processPayoutsGolfDotCom(json, moneyByPos);
 		callback();
 	}
 }
-	
+
 // function ProcessPayoutsGolfDotCom(json, moneyByPos) {
 // 	var	prevPos = json.leaderboard[0].current_position,
 // 		amateur_count = 0,
@@ -143,7 +143,7 @@ function ComputeMoneyAndPutInJsonGolfDotCom(json, callback) {
 // 		tieCount = 0,
 // 		tieMoney = 0;
 // 	_.forEach(json.leaderboard, function (player, idx) {
-// 		if (player.is_amateur) {		
+// 		if (player.is_amateur) {
 // 			amateur_count++;
 // 			json.leaderboard[idx].money_event = 0;
 // 			return;
@@ -172,39 +172,40 @@ function ComputeMoneyAndPutInJsonGolfDotCom(json, callback) {
 // 	}
 // }
 
-function ProcessPayoutsGolfDotCom(json, moneyByPos) {
+function processPayoutsGolfDotCom(json, moneyByPos) {
+	var lb = json.leaderboard;
+	var playerIdx = 0;
 	var moneyIdx = 1;
-	var playerCount = 0;
-	var sumMoney = 0;
-	var savePos = json.leaderboard[0].current_position;
-	_.forEach(json.leaderboard, function (player, idx) {
-		if (player.current_position !== savePos) spreadMoney(idx);
-		if (player.is_amateur) {
-			json.leaderboard[idx].money_event = 0;
-		} else {
-			sumMoney += moneyByPos[moneyIdx];
-			moneyIdx++;
-			playerCount++;
-		} 
-	});
-
-	function spreadMoney (idx) {
-		var money = Math.round(sumMoney / playerCount);
-		savePos = json.leaderboard[idx].current_position;
-		while (playerCount > 0) {
-			if (!json.leaderboard[idx - 1].is_amateur) {  // check if amateur
-				json.leaderboard[idx - 1].money_event = money;
-				playerCount--;
+	while (moneyByPos[moneyIdx]) {
+		var proCount = !lb[playerIdx].is_amateur ? 1 : 0;
+		var amCount = !lb[playerIdx].is_amateur ? 0 : 1;
+		var moneySum = moneyByPos[moneyIdx];
+		while (lb[playerIdx].current_position === lb[playerIdx + 1].current_position) {
+			if (!lb[playerIdx + 1].is_amateur) {
+				proCount++;
+				moneyIdx++;
+				if (moneyByPos[moneyIdx]) moneySum += moneyByPos[moneyIdx];
+			} else {
+				amCount++;
 			}
-			idx--;  // move player pointer back
+			playerIdx++;
 		}
-		sumMoney = 0;
+		distributeMoney();
+    playerIdx++;
+    moneyIdx++;
 	}
 
+	function distributeMoney() {
+		var numPlayers = proCount + amCount;
+		var curPlayerIdx = playerIdx + 1 - numPlayers;
+		var moneyPerPro = Math.round(moneySum / proCount);
+		while (numPlayers > 0) {
+			json.leaderboard[curPlayerIdx].money_event = (!json.leaderboard[curPlayerIdx].is_amateur) ? moneyPerPro : 0;
+			curPlayerIdx++;
+      numPlayers--;
+		}
+	}
 }
-
-
-
 
 function BuildMoneyArray(purse) {
 	var arr = [];
@@ -327,7 +328,7 @@ function ExtractPgaDataIntoFb(dataUrl) {
 							&& (pgaJson.round_state === round_state)) { ExitNode(); }
 				pgaJson = FormatPgaJson(pgaJson);
 				// if pgatour not providing money, then compute it like code for golf.com
-				if (pgaJson.leaderboard[0].money_event === 0) {	
+				if (pgaJson.leaderboard[0].money_event === 0) {
 					pgaJson.money = {};
 					pgaJson.money.total_purse = config.purse;
 					ComputeMoneyAndPutInJsonGolfDotCom(pgaJson, function () {
@@ -335,7 +336,7 @@ function ExtractPgaDataIntoFb(dataUrl) {
 					});
 				} else {
 					PutPgaJsonIntoFb(pgaJson);
-				}		
+				}
 			}
 		});
 	}).end();
@@ -386,4 +387,3 @@ function DoWork() {
 
 // ----  Main Processing
 IsWithinWindow(DoWork);
-
