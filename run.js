@@ -4,18 +4,28 @@ var http = require('http');
 var path = require('path');
 var url = require('url');
 var _ = require('lodash');
-var Firebase = require('firebase');
+// var Firebase = require('firebase');
 
-var curTourneyRef = new Firebase('https://weeklypgapool.firebaseio.com/tournaments/current'),
-		dataUrl,
+// New fb auth api using the firebase-auth module
+var admin = require("firebase-admin");
+
+var serviceAccount = require("./firebase-weeklypgapool-firebase-adminsdk-tmwr1-3ead64904a.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  databaseURL: "https://weeklypgapool.firebaseio.com"
+});
+
+var db = admin.database();
+var curTourneyRef = db.ref('tournaments/current');
+
+var	dataUrl,
+		forceNewData,
 		last_updated,
 		pgaJson,
 		round_state,
 		isGolfDotCom = false,
 		config = {};
-
-// Authenticate to fb
-curTourneyRef.auth('uOdRH5Zyzy4QzGSB1HFO2thq6KsKrTWx3FTSKd8A');
 
 // Local functions
 
@@ -30,15 +40,13 @@ function PutPgaJsonIntoFb(pgaJson) {
 	var lbStr = JSON.stringify(lb);
 	lbStr =	lbStr.replace(/\./g, '');
 	lb = JSON.parse(lbStr);
-	curTourneyRef.child('data/stats').update(pgaJson);
-	curTourneyRef.child('data/leaderboard').set(lb, function (err) {
-		if (err) {
-			console.log(err);
-		} else {
-			console.log('success');
+	curTourneyRef.child('data/stats').update(pgaJson)
+		.then(function() {
+			return curTourneyRef.child('data/leaderboard').set(lb);
+		})
+		.then(function() {
 			ExitNode();
-		}
-	});
+		});
 }
 
 function PutPgaJsonIntoFbGolfDotCom(pgaJson) {
@@ -48,15 +56,13 @@ function PutPgaJsonIntoFbGolfDotCom(pgaJson) {
 	var lbStr = JSON.stringify(lb);
 	lbStr =	lbStr.replace(/\./g, '');
 	lb = JSON.parse(lbStr);
-	curTourneyRef.child('data/stats').update(pgaJson);
-	curTourneyRef.child('data/leaderboard').set(lb, function (err) {
-		if (err) {
-			console.log(err);
-		} else {
-			console.log('success');
+	curTourneyRef.child('data/stats').update(pgaJson)
+		.then(function() {
+			return curTourneyRef.child('data/leaderboard').set(lb);
+		})
+		.then(function() {
 			ExitNode();
-		}
-	});
+		});
 }
 
 function FormatPgaJson(pgaJson) {
@@ -180,7 +186,7 @@ function processPayoutsGolfDotCom(json, moneyByPos) {
 		var proCount = !lb[playerIdx].is_amateur ? 1 : 0;
 		var amCount = !lb[playerIdx].is_amateur ? 0 : 1;
 		var moneySum = moneyByPos[moneyIdx];
-		while (lb[playerIdx].current_position === lb[playerIdx + 1].current_position) {
+		while (lb[playerIdx + 1].current_position && lb[playerIdx].current_position === lb[playerIdx + 1].current_position) {
 			if (!lb[playerIdx + 1].is_amateur) {
 				proCount++;
 				moneyIdx++;
@@ -323,9 +329,9 @@ function ExtractPgaDataIntoFb(dataUrl) {
 						PutPgaJsonIntoFbGolfDotCom(pgaJson);
 				});
 			} else {
-				if (pgaJson.last_updated === last_updated) { ExitNode(); }
-				if (pgaJson.round_state !== 'In Progress'
-							&& (pgaJson.round_state === round_state)) { ExitNode(); }
+				if (!forceNewData && pgaJson.last_updated === last_updated) { ExitNode(); }
+				if (!forceNewData && pgaJson.leaderboard.round_state !== 'In Progress'
+							&& pgaJson.leaderboard.round_state === round_state) { ExitNode(); }
 				pgaJson = FormatPgaJson(pgaJson);
 				// if pgatour not providing money, then compute it like code for golf.com
 				if (pgaJson.leaderboard[0].money_event === 0) {
@@ -343,20 +349,22 @@ function ExtractPgaDataIntoFb(dataUrl) {
 }
 
 function IsWithinWindow(callback) {
-	// Check if should force new data
-	curTourneyRef.child('forceNewData').once('value', function (snap) {
-		if (snap.val() === true) {
-			curTourneyRef.child('forceNewData').set(false);
-			callback();
-		} else {
-			curTourneyRef.child('custom_config').once('value', function (snap) {
-				config = snap.val();
+	curTourneyRef.child('custom_config').once('value', function (snap) {
+		config = snap.val();
+		// Check if should force new data
+		curTourneyRef.child('forceNewData').once('value', function (snap) {
+			forceNewData = snap.val();
+			if (forceNewData) {
+				curTourneyRef.child('forceNewData').set(false);
+				callback();
+			} else {
 				// Exit if not Thu thru Sun, or too early, or too late
 				var now = new Date();
 				var dow = now.getDay();
 				// check for custom window
 				if (config.window_start) {
-					if (now < Date(config.window_start) || now > Date(config.window_end)) {
+					now < new Date(config.window_start.substr(0, 10))
+					if (now < new Date(config.window_start.substr(0, 10)) || now > new Date(config.window_end.substr(0, 10))) {
 						ExitNode();
 					}
 				} else if (dow !== 0 && (dow < 4 || dow > 7)) {   // Ensure that it's Thu thru Sun
@@ -364,8 +372,8 @@ function IsWithinWindow(callback) {
 					ExitNode();
 				}
 				callback();
-			});
-		}
+			}
+		});
 	});
 }
 
@@ -375,7 +383,7 @@ function DoWork() {
 	curTourneyRef.child('dataUrl').once('value', function (snap) {
 		dataUrl = snap.val();
 		isGolfDotCom = (dataUrl.indexOf("data.golf.com") > -1);
-		curTourneyRef.child('data/last_updated').once('value', function (snap) {
+		curTourneyRef.child('data/stats/last_updated').once('value', function (snap) {
 			last_updated = snap.val();
 			curTourneyRef.child('data/stats/round_state').once('value', function (snap) {
 				round_state = snap.val();
