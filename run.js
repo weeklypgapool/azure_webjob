@@ -25,6 +25,7 @@ var	dataUrl,
 		pgaJson,
 		round_state,
 		isGolfDotCom = false,
+		isUSOpen = false,
 		config = {};
 
 // Local functions
@@ -127,6 +128,36 @@ function FormatPgaJsonGolfDotCom(pgaJson, callback) {
 	});
 }
 
+function FormatPgaJsonUSOpen(pgaJson, callback) {
+	var json = {};
+	var players = [];
+	json.last_updated = pgaJson.meta.generated;
+	json.round_state = getRoundStateUSOpen(pgaJson);
+	json.tournament_name = 'U.S. Open';
+	json.current_round = pgaJson.currentRound.number;
+	players = pgaJson.standings;
+	json.leaderboard = _.map(players, function (player) {
+		return {
+			"name": player.player.firstName + ' ' + player.player.lastName,
+			"player_id": player.player.indentifier,
+			"current_position": player.position.displayValue,
+			// "total_strokes": player.totalScore.value,
+			"thru": player.holesThrough.value,
+			"today": player.toParToday.value,
+			"total": player.toPar.value,
+			"tee_times": [{ '1': '?' }, { '2': '?' }, { '3': '?' }, { '4': '?' }]
+		};
+	});
+	ComputeMoneyAndPutInJsonUSOpen(json, function () {
+		callback(json);
+	});
+}
+
+function getRoundStateUSOpen(json) {
+	if (json.standings.every(player => player.holesThrough.value === 0)) return 'Groupings Official';
+	return json.standings.some(player => player.holesThrough.value !== 18) ? 'In Progress' : 'Complete';
+}
+
 function ComputeMoneyAndPutInJsonGolfDotCom(json, callback) {
 	var totalPurse,
 			moneyByPos;
@@ -142,41 +173,20 @@ function ComputeMoneyAndPutInJsonGolfDotCom(json, callback) {
 	}
 }
 
-// function ProcessPayoutsGolfDotCom(json, moneyByPos) {
-// 	var	prevPos = json.leaderboard[0].current_position,
-// 		amateur_count = 0,
-// 		tieStart = 1,
-// 		tieCount = 0,
-// 		tieMoney = 0;
-// 	_.forEach(json.leaderboard, function (player, idx) {
-// 		if (player.is_amateur) {
-// 			amateur_count++;
-// 			json.leaderboard[idx].money_event = 0;
-// 			return;
-// 		}
-// 		if (player.current_position !== prevPos) {
-// 			// Compute and store prev position(s)
-// 			for (var i = 0; i < tieCount; i++) {
-// 				json.leaderboard[tieStart + i - 1 + amateur_count].money_event = Math.round(tieMoney / tieCount);
-// 			}
-// 			// Save new pos
-// 			prevPos = player.current_position;
-// 			// Reset counters
-// 			tieCount = 1;
-// 			tieMoney = moneyByPos[idx + 1 - amateur_count];
-// 			// Mark position of possible tie
-// 			tieStart = idx + 1;
-// 		} else {
-// 			// Accumulate
-// 			tieCount++;
-// 			tieMoney = tieMoney + moneyByPos[idx + 1 - amateur_count];
-// 		}
-// 	});
-// 	// Last 'group' of players
-// 	for (var i = 0; i < tieCount; i++) {
-// 		json.leaderboard[tieStart + i - 1].money_event = Math.round(tieMoney / tieCount);
-// 	}
-// }
+function ComputeMoneyAndPutInJsonUSOpen(json, callback) {
+	var totalPurse,
+			moneyByPos;
+	if (config.money_computed_manually) {
+		moneyByPos = config.payouts;
+		processPayoutsGolfDotCom(json, moneyByPos);
+		callback();
+	} else {
+		totalPurse = config.purse;
+		moneyByPos = BuildMoneyArray(totalPurse);
+		processPayoutsGolfDotCom(json, moneyByPos);
+		callback();
+	}
+}
 
 function processPayoutsGolfDotCom(json, moneyByPos) {
 	var lb = json.leaderboard;
@@ -324,9 +334,14 @@ function ExtractPgaDataIntoFb(dataUrl) {
 				if (pgaJson.cts === last_updated) { ExitNode(); }
 				if (pgaJson.crst !== 'In Progress'
 							&& (pgaJson.crst === round_state)) { ExitNode(); }
-					FormatPgaJsonGolfDotCom(pgaJson, function (formattedJson) {
-						pgaJson = formattedJson;
-						PutPgaJsonIntoFbGolfDotCom(pgaJson);
+				FormatPgaJsonGolfDotCom(pgaJson, function (formattedJson) {
+					pgaJson = formattedJson;
+					PutPgaJsonIntoFbGolfDotCom(pgaJson);
+				});
+			} else if (isUSOpen) {
+				FormatPgaJsonUSOpen(pgaJson, function (formattedJson) {
+					pgaJson = formattedJson;
+					PutPgaJsonIntoFb(pgaJson);
 				});
 			} else {
 				if (!forceNewData && pgaJson.last_updated === last_updated) { ExitNode(); }
@@ -382,7 +397,9 @@ function DoWork() {
 	// manually entered into the fb.  Data transfer is done inside GetPgaJson()
 	curTourneyRef.child('dataUrl').once('value', function (snap) {
 		dataUrl = snap.val();
+		// dataUrl = "http://gripapi-static-pd.usopen.com/gripapi/leaderboard.json"
 		isGolfDotCom = (dataUrl.indexOf("data.golf.com") > -1);
+		isUSOpen = dataUrl.includes("usopen.com");
 		curTourneyRef.child('data/stats/last_updated').once('value', function (snap) {
 			last_updated = snap.val();
 			curTourneyRef.child('data/stats/round_state').once('value', function (snap) {
