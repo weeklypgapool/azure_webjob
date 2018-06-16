@@ -196,7 +196,7 @@ function processPayoutsGolfDotCom(json, moneyByPos) {
 		var proCount = !lb[playerIdx].is_amateur ? 1 : 0;
 		var amCount = !lb[playerIdx].is_amateur ? 0 : 1;
 		var moneySum = moneyByPos[moneyIdx];
-		while (lb[playerIdx + 1].current_position && lb[playerIdx].current_position === lb[playerIdx + 1].current_position) {
+		while (lb[playerIdx + 1] && lb[playerIdx + 1].current_position && lb[playerIdx].current_position === lb[playerIdx + 1].current_position) {
 			if (!lb[playerIdx + 1].is_amateur) {
 				proCount++;
 				moneyIdx++;
