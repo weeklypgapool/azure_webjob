@@ -66,38 +66,82 @@ function PutPgaJsonIntoFbGolfDotCom(pgaJson) {
 		});
 }
 
+function isV2(pgaJson) {
+  return !pgaJson.leaderboard;
+}
+
 function FormatPgaJson(pgaJson) {
 	var json = {};
-	var players = [];
-	json.last_updated = pgaJson.last_updated;
-	pgaJson = pgaJson.leaderboard;
-	json.round_state = pgaJson.round_state;
-	json.tournament_name = pgaJson.tournament_name;
-	json.current_round = pgaJson.current_round;
-//	json.start_date = pgaJson.start_date;
-//	json.end_date = pgaJson.end_date;
-//	json.is_started = pgaJson.is_started;
-//	json.is_finished = pgaJson.is_finished;
-	players = pgaJson.players;
-	json.leaderboard = _.map(players, function (player) {
-		return {
-			"name": player.player_bio.first_name + ' ' + player.player_bio.last_name,
-			"is_amateur": player.player_bio.is_amateur,
-			"player_id": player.player_id,
-			"current_position": player.current_position,
-			"total_strokes": player.total_strokes,
-			"thru": player.thru,
-			"today": player.today,
-			"total": player.total,
-			"money_event": player.rankings.projected_money_event,
-			"tee_times": {
-				"1": player.rounds['0'].tee_time,
-				"2": player.rounds['1'].tee_time,
-				"3": player.rounds['2'].tee_time,
-				"4": player.rounds['3'].tee_time
-			}
-		};
-	});
+  var players = [];
+  if (isV2(pgaJson)) {
+    json.last_updated = pgaJson.header.lastUpdated;
+    json.round_state = pgaJson.roundState;
+    // json.tournament_name = pgaJson.tournament_name;  NOT AVAILABLE!
+    json.current_round = pgaJson.tournamentRoundId;
+    // pgaJson = pgaJson.leaderboard;
+  //	json.start_date = pgaJson.start_date;
+  //	json.end_date = pgaJson.end_date;
+  //	json.is_started = pgaJson.is_started;
+  //	json.is_finished = pgaJson.is_finished;
+    players = pgaJson.rows;
+    json.leaderboard = _.map(players, function (player) {
+      return {
+        "name": player.playerNames.firstName + ' ' + player.playerNames.lastName,
+        // "is_amateur": player.player_bio.is_amateur,  CAN'T DETERMINE?
+        "is_amateur": false,   // TEMPORARY
+        "player_id": player.playerId,
+        "current_position": player.positionCurrent,
+        "total_strokes": player.strokes,
+        "thru": player.thru,
+        "today": player.round,
+        "total": player.total === '0' ? 'E' : player.total,
+        // "money_event": player.rankings.projected_money_event,  CAN'T DETERMIN
+        "money_event": 0,  // will need to compute
+        // "tee_times": {
+        //   "1": player.rounds['0'].tee_time,
+        //   "2": player.rounds['1'].tee_time,
+        //   "3": player.rounds['2'].tee_time,
+        //   "4": player.rounds['3'].tee_time
+        // }
+        "tee_times": {
+          "1": player.teeTime,
+          "2": player.teeTime,
+          "3": player.teeTime,
+          "4": player.teeTime
+        }
+      };
+    });
+  } else {
+    json.last_updated = pgaJson.last_updated;
+    pgaJson = pgaJson.leaderboard;
+    json.round_state = pgaJson.round_state;
+    json.tournament_name = pgaJson.tournament_name;
+    json.current_round = pgaJson.current_round;
+  //	json.start_date = pgaJson.start_date;
+  //	json.end_date = pgaJson.end_date;
+  //	json.is_started = pgaJson.is_started;
+  //	json.is_finished = pgaJson.is_finished;
+    players = pgaJson.players;
+    json.leaderboard = _.map(players, function (player) {
+      return {
+        "name": player.player_bio.first_name + ' ' + player.player_bio.last_name,
+        "is_amateur": player.player_bio.is_amateur,
+        "player_id": player.player_id,
+        "current_position": player.current_position,
+        "total_strokes": player.total_strokes,
+        "thru": player.thru,
+        "today": player.today,
+        "total": player.total,
+        "money_event": player.rankings.projected_money_event,
+        "tee_times": {
+          "1": player.rounds['0'].tee_time,
+          "2": player.rounds['1'].tee_time,
+          "3": player.rounds['2'].tee_time,
+          "4": player.rounds['3'].tee_time
+        }
+      };
+    });
+  }
 	return json;
 }
 
@@ -344,9 +388,13 @@ function ExtractPgaDataIntoFb(dataUrl) {
 					PutPgaJsonIntoFb(pgaJson);
 				});
 			} else {
-				if (!forceNewData && pgaJson.last_updated === last_updated) { ExitNode(); }
-				if (!forceNewData && pgaJson.leaderboard.round_state !== 'In Progress'
-							&& pgaJson.leaderboard.round_state === round_state) { ExitNode(); }
+        var thisLastUpdated = isV2(pgaJson) ?
+          pgaJson.header.lastUpdated : pgaJson.last_updated;
+          if (!forceNewData && thisLastUpdated === last_updated) { ExitNode(); }
+        var thisRoundState = isV2(pgaJson) ?
+          pgaJson.roundState : pgaJson.leaderboard.round_state;
+				if (!forceNewData && thisRoundState !== 'In Progress'
+							&& thisRoundState === round_state) { ExitNode(); }
 				pgaJson = FormatPgaJson(pgaJson);
 				// if pgatour not providing money, then compute it like code for golf.com
 				if (pgaJson.leaderboard[0].money_event === 0) {
