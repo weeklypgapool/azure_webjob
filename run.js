@@ -1,5 +1,7 @@
 "use strict";
 
+var axios = require('axios');
+
 var http = require('http');
 var path = require('path');
 var url = require('url');
@@ -361,54 +363,70 @@ function getTeeTimesGolfDotCom(player) {
 }
 
 function ExtractPgaDataIntoFb(dataUrl) {
-	http.get(dataUrl, function (resp) {
-		pgaJson = "";
-		resp.on('data', function (chunk) {
-			pgaJson += chunk;
-		});
-		resp.on('end', function () {
-			if (isGolfDotCom) {
-				pgaJson = pgaJson.replace(/callbackWrapper\(/, '');
-				pgaJson = pgaJson.substring(0, pgaJson.length - 2);
-			}
-			pgaJson = JSON.parse(pgaJson);
-			// Check if no reason to hit FB
-			if (isGolfDotCom) {
-				pgaJson = pgaJson.lb;
-				if (pgaJson.cts === last_updated) { ExitNode(); }
-				if (pgaJson.crst !== 'In Progress'
-							&& (pgaJson.crst === round_state)) { ExitNode(); }
-				FormatPgaJsonGolfDotCom(pgaJson, function (formattedJson) {
-					pgaJson = formattedJson;
-					PutPgaJsonIntoFbGolfDotCom(pgaJson);
-				});
-			} else if (isUSOpen) {
-				FormatPgaJsonUSOpen(pgaJson, function (formattedJson) {
-					pgaJson = formattedJson;
-					PutPgaJsonIntoFb(pgaJson);
-				});
-			} else {
-        var thisLastUpdated = isV2(pgaJson) ?
-          pgaJson.header.lastUpdated : pgaJson.last_updated;
-          if (!forceNewData && thisLastUpdated === last_updated) { ExitNode(); }
-        var thisRoundState = isV2(pgaJson) ?
-          pgaJson.roundState : pgaJson.leaderboard.round_state;
-				if (!forceNewData && thisRoundState !== 'In Progress'
-							&& thisRoundState === round_state) { ExitNode(); }
-				pgaJson = FormatPgaJson(pgaJson);
-				// if pgatour not providing money, then compute it like code for golf.com
-				if (pgaJson.leaderboard[0].money_event === 0) {
-					pgaJson.money = {};
-					pgaJson.money.total_purse = config.purse;
-					ComputeMoneyAndPutInJsonGolfDotCom(pgaJson, function () {
-						PutPgaJsonIntoFb(pgaJson);
-					});
-				} else {
-					PutPgaJsonIntoFb(pgaJson);
-				}
-			}
-		});
-	}).end();
+  let options;
+  if (isUSOpen) {
+    options = {
+      url: dataUrl,
+      headers: {
+        // 'Cache-Control': 'max-age=0',
+        // referer: dataUrl,
+        Connection: 'keep-alive',
+        'Upgrade-Insecure-Requests': 1,
+        // 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36',
+        // 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept-Language': 'en-US,en;q=0.9'
+      }
+    }
+  } else {
+    options = {
+      url: dataUrl
+    }
+  };
+  // changes have not been tested
+	axios.get(dataUrl).then(function (body) {
+		pgaJson = body.data;
+    if (isGolfDotCom) {
+      pgaJson = pgaJson.replace(/callbackWrapper\(/, '');
+      pgaJson = pgaJson.substring(0, pgaJson.length - 2);
+    }
+    // pgaJson = JSON.parse(pgaJson);
+    // Check if no reason to hit FB
+    if (isGolfDotCom) {
+      pgaJson = pgaJson.lb;
+      if (pgaJson.cts === last_updated) { ExitNode(); }
+      if (pgaJson.crst !== 'In Progress'
+            && (pgaJson.crst === round_state)) { ExitNode(); }
+      FormatPgaJsonGolfDotCom(pgaJson, function (formattedJson) {
+        pgaJson = formattedJson;
+        PutPgaJsonIntoFbGolfDotCom(pgaJson);
+      });
+    } else if (isUSOpen) {
+      FormatPgaJsonUSOpen(pgaJson, function (formattedJson) {
+        pgaJson = formattedJson;
+        PutPgaJsonIntoFb(pgaJson);
+      });
+    } else {
+      var thisLastUpdated = isV2(pgaJson) ?
+        pgaJson.header.lastUpdated : pgaJson.last_updated;
+        if (!forceNewData && thisLastUpdated === last_updated) { ExitNode(); }
+      var thisRoundState = isV2(pgaJson) ?
+        pgaJson.roundState : pgaJson.leaderboard.round_state;
+      if (!forceNewData && thisRoundState !== 'In Progress'
+            && thisRoundState === round_state) { ExitNode(); }
+      pgaJson = FormatPgaJson(pgaJson);
+      // if pgatour not providing money, then compute it like code for golf.com
+      if (pgaJson.leaderboard[0].money_event === 0) {
+        pgaJson.money = {};
+        pgaJson.money.total_purse = config.purse;
+        ComputeMoneyAndPutInJsonGolfDotCom(pgaJson, function () {
+          PutPgaJsonIntoFb(pgaJson);
+        });
+      } else {
+        PutPgaJsonIntoFb(pgaJson);
+      }
+    }
+	});
 }
 
 function IsWithinWindow(callback) {
