@@ -444,10 +444,11 @@ function IsWithinWindow(callback) {
 				var dow = now.getDay();
 				// check for custom window
 				if (config.window_start) {
-					now < new Date(config.window_start.substr(0, 10))
 					if (now < new Date(config.window_start.substr(0, 10)) || now > new Date(config.window_end.substr(0, 10))) {
 						ExitNode();
-					}
+					} else {
+            callback();
+          }
 				} else if (dow !== 0 && (dow < 4 || dow > 7)) {   // Ensure that it's Thu thru Sun
 					console.log('Not within time window');
 					ExitNode();
